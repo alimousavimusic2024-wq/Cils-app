@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>CILS Grammatica</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{--bg:#f6f7fb;--card:#fff;--tx:#1b1f2a;--mu:#6b7280;--ac:#2563eb;--ok:#16a34a;--bd:#e5e7eb}
+@media(prefers-color-scheme:dark){:root{--bg:#10131a;--card:#1a1f2b;--tx:#eef0f5;--mu:#9aa3b2;--bd:#2a3140}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,Tahoma,sans-serif;padding:16px;min-height:100vh}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:18px;max-width:560px;margin:0 auto 12px}
+h2{margin:0 0 12px}.mu{color:var(--mu);font-size:14px}
+.it{direction:ltr;text-align:left;font-size:19px;line-height:1.6}
+button{font:inherit;width:100%;padding:14px;border-radius:12px;border:1px solid var(--bd);background:var(--card);color:var(--tx);margin-top:10px;cursor:pointer}
+button.p{background:var(--ac);color:#fff;border:0}button.sel{border:2px solid var(--ac)}button:disabled{opacity:.5}
+.opt{direction:ltr;text-align:left}.bar{height:8px;background:var(--bd);border-radius:8px;overflow:hidden;margin:8px 0 16px}.bar i{display:block;height:100%;background:var(--ac)}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.grid button{margin:0}.row{display:flex;gap:8px}.big{font-size:44px;font-weight:700;text-align:center;color:var(--ac)}
+</style>
+</head>
+<body>
+<div id="app" class="card">در حال بارگذاری…</div>
+<script>
+const tg = window.Telegram.WebApp; tg.ready(); tg.expand();
+const API = 'https://cils-api.YOUR_SUBDOMAIN.workers.dev'; // <- set after deploying the Worker
+const app = document.getElementById('app');
+const S = { exam: null, i: 0, result: null };
+const ERR = { bank_not_ready: 'بانک سؤالات این سطح هنوز آماده نیست. بعداً دوباره تلاش کنید.', unauthorized: 'لطفاً برنامه را از داخل تلگرام باز کنید.', level_locked_today: 'امروز نمی‌توان سطح را تغییر داد.' };
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function call(path, body) {
+  const r = await fetch(API + path, { method: body ? 'POST' : 'GET', headers: { Authorization: 'tma ' + tg.initData, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || 'error'); return d;
+}
+const fail = (e) => { app.innerHTML = `<h2>خطا</h2><p>${esc(ERR[e.message] || 'مشکلی پیش آمد. دوباره تلاش کنید.')}</p><button class="p" onclick="init()">تلاش دوباره</button>`; };
+
+async function init() {
+  try {
+    const me = await call('/api/me');
+    if (!me.level) return pickLevel();
+    if (me.exam_today && me.exam_today.completed) return showResult();
+    app.innerHTML = `<h2>سلام ${esc(me.name || '')} 👋</h2><p class="mu">سطح شما: <b>${me.level}</b> — ۲۰ سؤال رایگان امروز</p><button class="p" onclick="start()">${me.exam_today ? 'ادامهٔ آزمون' : 'شروع آزمون'}</button>`;
+  } catch (e) { fail(e); }
+}
+function pickLevel() {
+  app.innerHTML = `<h2>سطح ایتالیایی خود را انتخاب کنید</h2><div class="grid">${['A1', 'A2', 'B1', 'B2', 'C1', 'C2'].map((l) => `<button onclick="setLevel('${l}')">${l}</button>`).join('')}</div>`;
+}
+async function setLevel(level) { try { await call('/api/level', { level }); init(); } catch (e) { fail(e); } }
+async function start() {
+  try {
+    S.exam = await call('/api/exam/start');
+    if (S.exam.completed) return showResult();
+    const firstOpen = S.exam.questions.findIndex((q) => !S.exam.answers[q.id]);
+    S.i = firstOpen < 0 ? 0 : firstOpen; render();
+  } catch (e) { fail(e); }
+}
+function render() {
+  const { questions, answers, level } = S.exam, q = questions[S.i], n = questions.length, sel = answers[q.id];
+  app.innerHTML = `<div class="mu">سؤال ${S.i + 1} از ${n} &nbsp; [${level}]</div><div class="bar"><i style="width:${(Object.keys(answers).length / n) * 100}%"></i></div>
+  <p class="it">${esc(q.question)}</p>
+  ${['A', 'B', 'C', 'D'].map((k) => `<button class="opt ${sel === k ? 'sel' : ''}" onclick="choose('${k}')">${k}) ${esc(q.options[k])}</button>`).join('')}
+  <div class="row"><button onclick="go(1)" ${S.i >= n - 1 ? 'disabled' : ''}>ادامه</button><button onclick="go(-1)" ${S.i === 0 ? 'disabled' : ''}>قبلی</button></div>`;
+}
+async function choose(k) {
+  const q = S.exam.questions[S.i];
+  try {
+    const r = await call('/api/exam/answer', { question_id: q.id, selected: k, index: S.i });
+    S.exam.answers[q.id] = k;
+    if (r.done) { S.result = r.result; return showResult(); }
+    render();
+  } catch (e) { fail(e); }
+}
+function go(d) { S.i = Math.max(0, Math.min(S.exam.questions.length - 1, S.i + d)); render(); }
+async function showResult() {
+  try {
+    const r = S.result || (S.result = await call('/api/exam/result'));
+    app.innerHTML = `<h2>نتیجه آزمون</h2><div class="big">${r.percent}%</div>
+    <p>سطح: <b>${r.level}</b><br>پاسخ صحیح: ${r.correct} — پاسخ غلط: ${r.incorrect}<br>${r.passed ? '✅ قبول' : '❌ نیاز به تمرین بیشتر'}</p>
+    <p class="mu">۲۰ سؤال رایگان امروز استفاده شد. فردا دوباره بیایید.</p>
+    <button class="p" onclick="pdf()">Download PDF</button>`;
+  } catch (e) { fail(e); }
+}
+async function pdf() {
+  const d = await call('/api/exam/review'), { jsPDF } = window.jspdf, doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const W = 180, L = 15; let y = 20;
+  const latin = (s) => String(s).replace(/[^\x20-\xFF]/g, '').trim(); // built-in font = Latin-1 (covers Italian accents)
+  const line = (t, size = 10, bold = false) => { doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size); for (const l of doc.splitTextToSize(latin(t), W)) { if (y > 280) { doc.addPage(); y = 20; } doc.text(l, L, y); y += size * 0.45 + 1.2; } };
+  line('CILS - Esame di grammatica', 18, true); y += 2;
+  line(`Studente: ${latin(d.name) || '-'}    Livello: ${d.level}    Data: ${d.date}`);
+  line(`Punteggio: ${d.correct}/20    Percentuale: ${d.percent}%    Esito: ${d.passed ? 'Superato' : 'Non superato'}`, 11, true); y += 4;
+  d.items.forEach((it, n) => {
+    if (y > 235) { doc.addPage(); y = 20; }
+    line(`Domanda ${n + 1}`, 12, true); line(it.question); y += 1;
+    ['A', 'B', 'C', 'D'].forEach((k) => line(`${k}) ${it.options[k]}`));
+    y += 1; line(`Tua risposta: ${it.selected ? it.selected + ') ' + it.options[it.selected] : '-'}${it.selected === it.correct ? '  [corretta]' : '  [errata]'}`, 10, true);
+    line(`Risposta corretta: ${it.correct}) ${it.options[it.correct]}`, 10, true);
+    line(`Spiegazione: ${it.explanation}`); line(`Argomento: ${it.topic}`); y += 5;
+  });
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) { doc.setPage(p); doc.setFontSize(8); doc.text(`${p} / ${pages}`, 105, 290, { align: 'center' }); }
+  const blob = doc.output('blob'), a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `cils-${d.date}.pdf`; a.click();
+}
+init();
+</script>
+</body>
+</html>

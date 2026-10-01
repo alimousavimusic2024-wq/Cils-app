@@ -1,0 +1,18 @@
+name = "cils-api"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cils"
+database_id = "PASTE_ID_FROM_wrangler_d1_create"
+
+[triggers]
+crons = ["0 */6 * * *"]
+
+[vars]
+ALLOWED_ORIGIN = "https://YOUR_GITHUB_USER.github.io"
+WEBAPP_URL = "https://YOUR_GITHUB_USER.github.io/YOUR_REPO/"
+GEMINI_MODEL = "gemini-2.5-flash"
+TARGET_PER_LEVEL = "300"
+# Secrets (wrangler secret put): BOT_TOKEN, GEMINI_API_KEY, ADMIN_TOKEN, WEBHOOK_SECRET
